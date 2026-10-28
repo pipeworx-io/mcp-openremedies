@@ -954,19 +954,113 @@ async function parseJsonBounded<T>(
  * tools/list (2026-09-08); if OpenRemedies changes its tool surface, this
  * file must be updated to match.
  *
- * LISTED for search and routing (fleet #3443). The origin still points at
- * staging until the apex cuts over; that flip is a launch item (README.md).
+ * LISTED for search and routing (fleet #3443). The origin is the apex
+ * (fleet #3511); it still self-reports a staging version, which the pack
+ * surfaces in every response's `deployment` object.
  */
 
 
-// At launch this flips to https://openremedies.com/mcp — the one config
-// change fleet #1392 calls for, alongside un-listing (see README.md).
-const ORIGIN = 'https://staging.openremedies.com/mcp';
+// Flipped to the apex (fleet #3511) after it began answering. As of the flip
+// it still reports serverInfo.version "0.1-staging", so responses keep their
+// non-production disclosure until the upstream reports a production version.
+const ORIGIN = 'https://openremedies.com/mcp';
 
 const UA = 'pipeworx-openremedies/1.0 (+https://pipeworx.io)';
 
 const POSTURE =
   'OpenRemedies is a lookup of sourced treatment records (approved, off-label, supplements, in development, recruiting). It never recommends treatment, diagnoses, doses, or declares trial eligibility. Every record carries a citation; empty results mean no records in covered sources, not that no treatments exist. Built on pipeworx.';
+
+
+// ── Environment disclosure (fleet #3660) ─────────────────────────────────
+// The origin currently answers from a staging host. Nothing in the payload
+// said so. The disclosure is DERIVED, never hardcoded: the upstream reports
+// its own version in initialize.serverInfo.version ("0.1-staging" today) and
+// we read the environment from that, plus the host we actually called. When
+// the origin flips and the upstream reports a production version, the
+// non-production wording stops being emitted by itself.
+const NON_PROD_MARKER = /(^|[^a-z0-9])(staging|stage|dev|development|test|testing|preview|sandbox|snapshot|canary|nightly|alpha|beta)([^a-z0-9]|$)/i;
+
+export interface Deployment {
+  environment: 'non-production' | 'production' | 'unknown';
+  upstream_version: string | null;
+  upstream_host: string;
+  notice: string;
+}
+
+export function describeDeployment(version: string | null, origin: string): Deployment {
+  let host = origin;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    // keep the raw string
+  }
+  const v = typeof version === 'string' && version.trim() ? version.trim() : null;
+  const nonProd = (v !== null && NON_PROD_MARKER.test(v)) || NON_PROD_MARKER.test(host);
+  if (nonProd) {
+    return {
+      environment: 'non-production',
+      upstream_version: v,
+      upstream_host: host,
+      notice:
+        `This answer was served by a NON-PRODUCTION OpenRemedies host (${host}` +
+        (v ? `, upstream version "${v}"` : '') +
+        '). There is no uptime or freshness promise: data may be older, incomplete or differ from production, and some sources may be failing (see meta.freshness). Do not present it as production data.',
+    };
+  }
+  if (v === null) {
+    return {
+      environment: 'unknown',
+      upstream_version: null,
+      upstream_host: host,
+      notice: `The upstream did not report its version, so whether ${host} is production could not be confirmed. Check meta.freshness before relying on this answer.`,
+    };
+  }
+  return {
+    environment: 'production',
+    upstream_version: v,
+    upstream_host: host,
+    notice: `Served by OpenRemedies production host ${host} (upstream version "${v}"). Per-source freshness is in meta.freshness.`,
+  };
+}
+
+const VERSION_TTL_MS = 10 * 60 * 1000;
+let versionCache: { at: number; version: string | null } | null = null;
+
+async function fetchUpstreamVersion(): Promise<string | null> {
+  if (versionCache && Date.now() - versionCache.at < VERSION_TTL_MS) return versionCache.version;
+  let version: string | null = null;
+  try {
+    const res = await fetchWithTimeout(
+      ORIGIN,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': UA },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'pipeworx', version: '1.0' } },
+        }),
+      },
+      'OpenRemedies',
+    );
+    if (res.ok) {
+      const j = (await res.json()) as { result?: { serverInfo?: { version?: unknown } } };
+      const v = j.result?.serverInfo?.version;
+      if (typeof v === 'string' && v.trim()) version = v.trim();
+    }
+  } catch {
+    // Never fail the tool call over the disclosure lookup; "unknown" is reported.
+  }
+  // Only cache a real answer, so a transient miss is retried on the next call.
+  if (version !== null) versionCache = { at: Date.now(), version };
+  return version;
+}
+
+/** Test hook: forget the cached upstream version. */
+export function _resetVersionCache(): void {
+  versionCache = null;
+}
 
 const tools: McpToolExport['tools'] = [
   {
@@ -1090,6 +1184,7 @@ interface JsonRpcToolResponse {
 async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   if (!TOOL_NAMES.has(name)) throw new Error(`Unknown tool: ${name}`);
 
+  const versionP = fetchUpstreamVersion();
   const res = await fetchWithTimeout(
     ORIGIN,
     {
@@ -1129,6 +1224,8 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
   // { data, meta } — meta carries source citations, per-source freshness,
   // data_version and coverage notes. Surface it parsed so callers get
   // structured records rather than a JSON string.
+  const deployment = describeDeployment(await versionP, ORIGIN);
+
   let payload: unknown;
   try {
     payload = JSON.parse(text);
@@ -1137,9 +1234,9 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
   }
 
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    return { ...(payload as Record<string, unknown>), posture: POSTURE };
+    return { deployment, ...(payload as Record<string, unknown>), posture: POSTURE };
   }
-  return { data: payload, posture: POSTURE };
+  return { deployment, data: payload, posture: POSTURE };
 }
 
 export default { tools, callTool, meter: { credits: 1 } } satisfies McpToolExport;

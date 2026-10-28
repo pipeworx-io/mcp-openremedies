@@ -2,7 +2,7 @@
 
 OpenRemedies is a lookup of sourced treatment records (approved, off-label, supplements, in development, recruiting). It never recommends treatment, diagnoses, doses, or declares trial eligibility. Every record carries a citation; empty results mean no records in covered sources, not that no treatments exist. Built on pipeworx.
 
-Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1875+ live data sources. This is an independent, unofficial integration — not affiliated with, endorsed by, or published by the upstream provider.
+Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1856+ live data sources. This is an independent, unofficial integration — not affiliated with, endorsed by, or published by the upstream provider.
 
 *(That paragraph is the medical-content posture from the OpenRemedies MCP
 endpoint's `initialize.instructions`, preserved verbatim per fleet #1392.
@@ -36,18 +36,34 @@ should I look at" — it returns an empty list for concepts with no hierarchy
 neighbours carrying records (e.g. `psoriasis`, `atopic eczema`), which means
 no neighbours in the covered hierarchy, not that none exist.
 
-## Listed; origin flip still pending (fleet #3443)
+## Listed; origin flipped to the apex (fleet #3511)
 
 Bruce lifted the unlisted hold for search and routing on 2026-10-21. The pack
-is in the catalog, in `search_packs` and on routing menus. The origin in
-`src/index.ts` still points at `staging.openremedies.com` because the apex is
-not cut over; flipping `ORIGIN` to `https://openremedies.com/mcp` and adding a
-registry-api `/uptime` row stay launch items for the OpenRemedies PM.
+is in the catalog, in `search_packs` and on routing menus. On 2026-10-26 the
+OpenRemedies apex began answering (it had returned 522 that morning), and
+`ORIGIN` in `src/index.ts` now points at it. On the same calls the apex and the
+former staging host returned identical `tools/list` and `get_coverage` bodies,
+so the apex is currently the same deployment. It still reports a staging
+version, so every response keeps its `deployment` notice until the upstream
+reports a production version. Adding a registry-api `/uptime` row remains a
+launch item for the OpenRemedies PM.
 
 The tool definitions in `src/index.ts` are copied from the endpoint's
 `tools/list`. If OpenRemedies changes its tool surface, update them to match;
 nothing syncs them automatically. Coverage figures (sources, jurisdictions)
 come from `get_coverage`; never hard-code them in a description.
+
+## Environment disclosure (fleet #3660)
+
+Every response carries a top-level `deployment` object (`environment`,
+`upstream_version`, `upstream_host`, `notice`). It is derived, not written by
+hand: the pack reads the upstream's own reported version and the host it
+called. A staging version or host yields `non-production` with a notice that
+promises no uptime or freshness; a clean version on a clean host yields
+`production`; an unreadable version yields `unknown`. When `ORIGIN` flips and
+the upstream reports a production version, the non-production wording stops by
+itself. `src/index.test.ts` fails if a production-looking version produces the
+non-production wording.
 
 ## Quick Start
 
@@ -93,7 +109,7 @@ directly, instead of just this one's:
 }
 ```
 
-Both URLs reach the same gateway and the same 1875+ data sources. The
+Both URLs reach the same gateway and the same 1856+ data sources. The
 only difference is which pack's tools are listed **directly**; `ask_pipeworx`
 reaches all of them from either one.
 
