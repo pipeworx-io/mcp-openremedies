@@ -1,12 +1,20 @@
 {
   "name": "@pipeworx/mcp-openremedies",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OpenRemedies is a lookup of sourced treatment records for a condition: approved medicines by country, documented off-label use, herbs and supplements, treatments in development, and recruiting clinical trials, drawn from national medicines registers and the ClinicalTrials.gov registry.",
   "type": "module",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./tools.json": "./tools.json",
+    "./package.json": "./package.json"
+  },
   "bin": {
     "mcp-openremedies": "bin/cli.js"
+  },
+  "files": ["bin/", "lib/", "tools.json", "server.json"],
+  "engines": {
+    "node": ">=18"
   },
   "keywords": ["mcp", "mcp-server", "model-context-protocol", "pipeworx", "openremedies"],
   "license": "MIT",
@@ -14,19 +22,12 @@
     "type": "git",
     "url": "git+https://github.com/pipeworx-io/mcp-openremedies.git"
   },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "tsx": "^4.19.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.9.3",
-    "@cloudflare/workers-types": "^4.20260405.1"
-  },
+  "mcpName": "io.github.pipeworx-io/openremedies",
   "pipeworx": {
-    "sourceHash": "v1-69af9c4eabdc911019787ebad63976f371c22d3acfe878279a46fbabf939c3db",
-    "sourceCommit": "f54ad77e789f27fe393978f9c080b5b18c87bb4f"
+    "mode": "gateway",
+    "slug": "openremedies",
+    "gatewaySlug": "openremedies",
+    "sourceHash": "v1-acb3a680b0ab4b0ba28576bb2f48710e663382888609eae5093776baa073072c",
+    "sourceCommit": "b2c4383545bb35171d0ada2beb1c9c7168ea175e"
   }
 }
